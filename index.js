@@ -36,6 +36,7 @@ async function getUserPage(userLogin) {
       JSON.stringify(responses, null, 2),
       'utf-8'
     );
+    return responses;
   } catch (error) {
     throw error;
   } finally {
@@ -43,6 +44,64 @@ async function getUserPage(userLogin) {
   }
 }
 
-getUserPage('TheRock')
+function getTweetsUrls(content) {
+  try {
+    const screenName = content[0].data.data.user.result.legacy.screen_name;
+    const tweetsSection =
+      content.slice(-1)[0].data.data.user.result.timeline_v2.timeline
+        .instructions[1].entries;
+    const tweetsUrls = [];
+
+    for (const tweet of tweetsSection) {
+      if (/^tweet-(.+)/.test(tweet.entryId)) {
+        if (
+          tweet.content.itemContent.tweet_results.result.legacy
+            .retweeted_status_result
+        ) {
+          const originalScreenName =
+            tweet.content.itemContent.tweet_results.result.legacy
+              .retweeted_status_result.result.core.user_results.result.legacy
+              .screen_name;
+          const originalTweetId =
+            tweet.content.itemContent.tweet_results.result.legacy
+              .retweeted_status_result.result.rest_id;
+
+          tweetsUrls.push({
+            status: 'Retweet',
+            url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
+            original_url: `${process.env.TWITTER_BASE}/${originalScreenName}/status/${originalTweetId}`,
+          });
+        } else if (
+          tweet.content.itemContent.tweet_results.result.legacy.is_quote_status
+        ) {
+          tweetsUrls.push({
+            status: 'Quotation',
+            url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
+            original_url:
+              tweet.content.itemContent.tweet_results.result.legacy
+                .quoted_status_permalink.expanded,
+          });
+        } else {
+          tweetsUrls.push({
+            status: 'Tweet',
+            url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
+            original_url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
+          });
+        }
+      }
+
+      if (tweetsUrls.length >= 10) {
+        break;
+      }
+    }
+
+    return tweetsUrls;
+  } catch (error) {
+    throw error;
+  }
+}
+
+getUserPage('ChrisEvans')
+  .then((responses) => console.log(getTweetsUrls(responses)))
   .then(() => console.log('Done ✅'))
   .catch(console.log);
