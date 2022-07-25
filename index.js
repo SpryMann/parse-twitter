@@ -3,11 +3,10 @@ import puppeteer from 'puppeteer';
 import fakeUa from 'fake-useragent';
 import { promises as fsPromises } from 'fs';
 
-async function getUserPage(userLogin) {
-  const browser = await puppeteer.launch();
+async function getUserPage(userLogin, browser) {
+  const page = await browser.newPage();
   try {
     const responses = [];
-    const page = await browser.newPage();
     await page.setRequestInterception(true);
 
     page.on('request', (req) => {
@@ -23,6 +22,7 @@ async function getUserPage(userLogin) {
           url: res.url(),
           data: await res.json(),
         });
+        return responses;
       }
     });
 
@@ -40,15 +40,14 @@ async function getUserPage(userLogin) {
   } catch (error) {
     throw error;
   } finally {
-    await browser.close();
+    await page.close();
   }
 }
 
-async function getTweetDetails(tweetUrl) {
-  const browser = await puppeteer.launch();
+async function getTweetDetails(tweetUrl, browser) {
+  const page = await browser.newPage();
   try {
     let tweetDetails = {};
-    const page = await browser.newPage();
     await page.setRequestInterception(true);
 
     page.on('request', (req) => {
@@ -62,6 +61,7 @@ async function getTweetDetails(tweetUrl) {
         !Object.keys(tweetDetails).length
       ) {
         tweetDetails = await res.json();
+        return tweetDetails;
       }
     });
 
@@ -73,10 +73,11 @@ async function getTweetDetails(tweetUrl) {
       JSON.stringify(tweetDetails, null, 2),
       'utf-8'
     );
+    return tweetDetails;
   } catch (error) {
     throw error;
   } finally {
-    await browser.close();
+    await page.close();
   }
 }
 
@@ -103,6 +104,7 @@ function getTweetsUrls(content) {
               .retweeted_status_result.result.rest_id;
 
           tweetsUrls.push({
+            screenName,
             status: 'Retweet',
             url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
             original_url: `${process.env.TWITTER_BASE}/${originalScreenName}/status/${originalTweetId}`,
@@ -111,6 +113,7 @@ function getTweetsUrls(content) {
           tweet.content.itemContent.tweet_results.result.legacy.is_quote_status
         ) {
           tweetsUrls.push({
+            screenName,
             status: 'Quotation',
             url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
             original_url:
@@ -119,6 +122,7 @@ function getTweetsUrls(content) {
           });
         } else {
           tweetsUrls.push({
+            screenName,
             status: 'Tweet',
             url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
             original_url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
@@ -137,7 +141,139 @@ function getTweetsUrls(content) {
   }
 }
 
-getUserPage('GeorgeRussell63')
-  .then((responses) => getTweetDetails(getTweetsUrls(responses)[0].url))
-  .then(() => console.log('Done ✅'))
-  .catch(console.log);
+function readTweetDetails(tweetPreInfo, content) {
+  try {
+    const tweetDetails =
+      content.data.threaded_conversation_with_injections_v2.instructions[0]
+        .entries[0];
+    const tweetResultBlock =
+      tweetDetails.content.itemContent.tweet_results.result;
+    const tweetLegacyBlock = tweetResultBlock.legacy;
+    const tweetInfo = {
+      login: tweetPreInfo.screenName,
+      tweet: {},
+    };
+    let tweetFullText = tweetLegacyBlock.full_text.trim();
+    const { outer_url, video, photo } = getTweetMedia(tweetLegacyBlock);
+
+    tweetInfo.tweet.outer_url = outer_url;
+    tweetInfo.tweet.video = video;
+    tweetInfo.tweet.photo = photo;
+    tweetInfo.tweet.full_text = tweetFullText;
+    tweetFullText = editTweetText(tweetInfo.tweet, tweetLegacyBlock);
+
+    if (tweetPreInfo.status === 'Quotation') {
+      const tweetQuoteLegacyBlock =
+        tweetResultBlock.quoted_status_result.result.legacy;
+      const parentTweet = {};
+      let parentTweetFullText = tweetQuoteLegacyBlock.full_text.trim();
+      const {
+        outer_url: parentOuterUrl,
+        video: parentVideo,
+        photo: parentPhoto,
+      } = getTweetMedia(tweetQuoteLegacyBlock);
+      parentTweet.outer_url = parentOuterUrl;
+      parentTweet.video = parentVideo;
+      parentTweet.photo = parentPhoto;
+      parentTweet.full_text = parentTweetFullText;
+      parentTweetFullText = editTweetText(parentTweet, tweetQuoteLegacyBlock);
+      parentTweet.full_text = parentTweetFullText;
+      tweetInfo.tweet.parent = parentTweet;
+    }
+
+    tweetInfo.tweet.full_text = tweetFullText;
+    return tweetInfo;
+  } catch (error) {
+    throw error;
+  }
+}
+
+function getTweetMedia(tweetLegacyBlock) {
+  try {
+    const mediaInfo = {
+      outer_url: null,
+      video: null,
+      photo: null,
+    };
+
+    if (tweetLegacyBlock.extended_entities) {
+      const extEnt = tweetLegacyBlock.extended_entities;
+      const type = extEnt.media[0].type;
+
+      if (type === 'photo') {
+        mediaInfo.photo = extEnt.media[0].media_url_https;
+      } else if (type === 'video' || type === 'animated_gif') {
+        mediaInfo.video = extEnt.media[0].video_info.variants
+          .filter((item) => item.hasOwnProperty('bitrate') && item.bitrate >= 0)
+          .sort((a, b) => b.bitrate - a.bitrate)[0].url;
+      }
+    }
+
+    if (tweetLegacyBlock.entities.urls.length) {
+      mediaInfo.outer_url = tweetLegacyBlock.entities.urls[0].expanded_url;
+    }
+
+    return mediaInfo;
+  } catch (error) {
+    throw error;
+  }
+}
+
+function editTweetText(tweetInfo, tweetLegacyBlock) {
+  try {
+    if (tweetInfo.outer_url || tweetInfo.video || tweetInfo.photo) {
+      tweetInfo.full_text = tweetInfo.full_text
+        .split(' ')
+        .slice(0, -1)
+        .join(' ');
+    }
+
+    if (tweetLegacyBlock.entities.user_mentions.length) {
+      const mentions = tweetLegacyBlock.entities.user_mentions;
+
+      for (const mention of mentions) {
+        tweetInfo.full_text = tweetInfo.full_text.replace(
+          `@${mention.screen_name}`,
+          `<a href="${process.env.TWITTER_BASE}/${mention.screen_name}">@${mention.screen_name}</a>`
+        );
+      }
+    }
+
+    return tweetInfo.full_text;
+  } catch (error) {
+    throw error;
+  }
+}
+
+(async () => {
+  const browser = await puppeteer.launch();
+
+  try {
+    const start = performance.now();
+    const responses = await getUserPage('ChrisEvans', browser);
+    const tweetsUrls = getTweetsUrls(responses);
+    const tweetsInfo = [];
+
+    for (const index in tweetsUrls) {
+      const preTweetDetails = await getTweetDetails(
+        tweetsUrls[index].status === 'Retweet'
+          ? tweetsUrls[index].original_url
+          : tweetsUrls[index].url,
+        browser
+      );
+      tweetsInfo.push(readTweetDetails(tweetsUrls[index], preTweetDetails));
+      console.log(`[⏳] Processed #${parseInt(index) + 1}`);
+    }
+
+    await fsPromises.writeFile(
+      'tweets.json',
+      JSON.stringify(tweetsInfo, null, 2),
+      'utf-8'
+    );
+    console.log(`Done ✅. Time: ${(performance.now() - start) / 1000}`);
+  } catch (error) {
+    console.log(error);
+  } finally {
+    await browser.close();
+  }
+})();
