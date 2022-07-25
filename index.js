@@ -44,6 +44,42 @@ async function getUserPage(userLogin) {
   }
 }
 
+async function getTweetDetails(tweetUrl) {
+  const browser = await puppeteer.launch();
+  try {
+    let tweetDetails = {};
+    const page = await browser.newPage();
+    await page.setRequestInterception(true);
+
+    page.on('request', (req) => {
+      req.continue();
+    });
+
+    page.on('response', async (res) => {
+      if (
+        res.request().method() === 'GET' &&
+        /\/graphql\/(.+)\/TweetDetail/.test(res.url()) &&
+        !Object.keys(tweetDetails).length
+      ) {
+        tweetDetails = await res.json();
+      }
+    });
+
+    await page.setUserAgent(fakeUa());
+    await page.setViewport({ width: 2560, height: 1440 });
+    await page.goto(tweetUrl, { waitUntil: 'networkidle0' });
+    await fsPromises.writeFile(
+      'tweetDetails.json',
+      JSON.stringify(tweetDetails, null, 2),
+      'utf-8'
+    );
+  } catch (error) {
+    throw error;
+  } finally {
+    await browser.close();
+  }
+}
+
 function getTweetsUrls(content) {
   try {
     const screenName = content[0].data.data.user.result.legacy.screen_name;
@@ -101,7 +137,7 @@ function getTweetsUrls(content) {
   }
 }
 
-getUserPage('ChrisEvans')
-  .then((responses) => console.log(getTweetsUrls(responses)))
+getUserPage('GeorgeRussell63')
+  .then((responses) => getTweetDetails(getTweetsUrls(responses)[0].url))
   .then(() => console.log('Done ✅'))
   .catch(console.log);
