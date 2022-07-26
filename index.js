@@ -3,6 +3,34 @@ import puppeteer from 'puppeteer';
 import fakeUa from 'fake-useragent';
 import { promises as fsPromises } from 'fs';
 
+class TaskQueue {
+  constructor(concurrency) {
+    this.concurrency = concurrency;
+    this.running = 0;
+    this.queue = [];
+  }
+
+  runTask(task) {
+    return new Promise((resolve, reject) => {
+      this.queue.push(() => {
+        return task().then(resolve, reject);
+      });
+      process.nextTick(this.next.bind(this));
+    });
+  }
+
+  next() {
+    while (this.running < this.concurrency && this.queue.length) {
+      const task = this.queue.shift();
+      task().finally(() => {
+        this.running -= 1;
+        this.next();
+      });
+      this.running += 1;
+    }
+  }
+}
+
 async function getUserPage(userLogin, browser) {
   const page = await browser.newPage();
   try {
@@ -61,7 +89,7 @@ async function getTweetDetails(tweetUrl, browser) {
         !Object.keys(tweetDetails).length
       ) {
         tweetDetails = await res.json();
-        return tweetDetails;
+        return [tweetDetails, tweetUrl];
       }
     });
 
@@ -73,7 +101,7 @@ async function getTweetDetails(tweetUrl, browser) {
       JSON.stringify(tweetDetails, null, 2),
       'utf-8'
     );
-    return tweetDetails;
+    return [tweetDetails, tweetUrl];
   } catch (error) {
     throw error;
   } finally {
@@ -223,9 +251,8 @@ function editTweetText(tweetInfo, tweetLegacyBlock) {
   try {
     if (tweetInfo.outer_url || tweetInfo.video || tweetInfo.photo) {
       tweetInfo.full_text = tweetInfo.full_text
-        .split(' ')
-        .slice(0, -1)
-        .join(' ');
+        .slice(0, tweetInfo.full_text.indexOf('https://t.co/'))
+        .trim();
     }
 
     if (tweetLegacyBlock.entities.user_mentions.length) {
@@ -245,23 +272,41 @@ function editTweetText(tweetInfo, tweetLegacyBlock) {
   }
 }
 
+function tweetTask(tweetObj, browser, queue) {
+  return queue.runTask(() => {
+    return getTweetDetails(
+      tweetObj.status === 'Retweet' ? tweetObj.original_url : tweetObj.url,
+      browser
+    );
+  });
+}
+
 (async () => {
   const browser = await puppeteer.launch();
 
   try {
     const start = performance.now();
-    const responses = await getUserPage('ChrisEvans', browser);
+    const responses = await getUserPage('wylsacom', browser);
     const tweetsUrls = getTweetsUrls(responses);
     const tweetsInfo = [];
+    const queue = new TaskQueue(5);
+    const promises = tweetsUrls.map((tweetUrl) =>
+      tweetTask(tweetUrl, browser, queue)
+    );
 
-    for (const index in tweetsUrls) {
-      const preTweetDetails = await getTweetDetails(
-        tweetsUrls[index].status === 'Retweet'
-          ? tweetsUrls[index].original_url
-          : tweetsUrls[index].url,
-        browser
+    const tweets = await Promise.all(promises);
+
+    for (const index in tweets) {
+      tweetsInfo.push(
+        readTweetDetails(
+          tweetsUrls.find(
+            (item) =>
+              item.url === tweets[index][1] ||
+              item.original_url === tweets[index][1]
+          ),
+          tweets[index][0]
+        )
       );
-      tweetsInfo.push(readTweetDetails(tweetsUrls[index], preTweetDetails));
       console.log(`[⏳] Processed #${parseInt(index) + 1}`);
     }
 
@@ -270,7 +315,9 @@ function editTweetText(tweetInfo, tweetLegacyBlock) {
       JSON.stringify(tweetsInfo, null, 2),
       'utf-8'
     );
-    console.log(`Done ✅. Time: ${(performance.now() - start) / 1000}`);
+    console.log(
+      `Done ✅. Time: ${((performance.now() - start) / 1000).toFixed(2)}`
+    );
   } catch (error) {
     console.log(error);
   } finally {
