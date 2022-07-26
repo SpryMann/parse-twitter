@@ -179,7 +179,9 @@ function readTweetDetails(tweetPreInfo, content) {
     const tweetLegacyBlock = tweetResultBlock.legacy;
     const tweetInfo = {
       login: tweetPreInfo.screenName,
-      tweet: {},
+      tweet: {
+        id: tweetPreInfo.url.split('/').slice(-1)[0],
+      },
     };
     let tweetFullText = tweetLegacyBlock.full_text.trim();
     const { outer_url, video, photo } = getTweetMedia(tweetLegacyBlock);
@@ -286,7 +288,7 @@ function tweetTask(tweetObj, browser, queue) {
 
   try {
     const start = performance.now();
-    const responses = await getUserPage('wylsacom', browser);
+    const responses = await getUserPage('VancityReynolds', browser);
     const tweetsUrls = getTweetsUrls(responses);
     const tweetsInfo = [];
     const queue = new TaskQueue(5);
@@ -315,6 +317,7 @@ function tweetTask(tweetObj, browser, queue) {
       JSON.stringify(tweetsInfo, null, 2),
       'utf-8'
     );
+    console.log(`Last post id: ${tweetsInfo[0].tweet.id}`);
     console.log(
       `Done ✅. Time: ${((performance.now() - start) / 1000).toFixed(2)}`
     );
