@@ -296,53 +296,72 @@ function tweetTask(tweetObj, browser, queue) {
   });
 }
 
+async function mainTask(browser, login) {
+  const start = performance.now();
+  const responses = await getUserPage(login, browser);
+  const tweetsUrls = await getTweetsUrls(login, responses);
+  const tweetsInfo = [];
+  const queue = new TaskQueue(2);
+  const promises = tweetsUrls.map((tweetUrl) =>
+    tweetTask(tweetUrl, browser, queue)
+  );
+
+  const tweets = await Promise.all(promises);
+
+  for (const index in tweets) {
+    tweetsInfo.push(
+      readTweetDetails(
+        tweetsUrls.find(
+          (item) =>
+            item.url === tweets[index][1] ||
+            item.original_url === tweets[index][1]
+        ),
+        tweets[index][0]
+      )
+    );
+    console.log(`[⏳] Processed #${parseInt(index) + 1}`);
+  }
+
+  if (tweetsInfo.length) {
+    await fsPromises.writeFile(
+      'tweets.json',
+      JSON.stringify(tweetsInfo, null, 2),
+      'utf-8'
+    );
+    await User.updateOne(
+      { login: login.toLowerCase() },
+      { login: login.toLowerCase(), tweetId: tweetsInfo[0].tweet.id },
+      { upsert: true }
+    );
+  } else {
+    console.log(`User with login ${login} has no new tweets`);
+  }
+  console.log(
+    `Done with ${login} ✅. Time: ${(
+      (performance.now() - start) /
+      1000
+    ).toFixed(2)}`
+  );
+
+  return tweetsInfo;
+}
+
 (async () => {
   const browser = await puppeteer.launch();
-  const login = 'theweeknd';
+  const logins = ['Skydance', 'AADaddario', 'taylorswift13'];
+  const data = [];
   try {
-    const start = performance.now();
-    const responses = await getUserPage(login, browser);
-    const tweetsUrls = await getTweetsUrls(login, responses);
-    const tweetsInfo = [];
-    const queue = new TaskQueue(2);
-    const promises = tweetsUrls.map((tweetUrl) =>
-      tweetTask(tweetUrl, browser, queue)
-    );
-
-    const tweets = await Promise.all(promises);
-
-    for (const index in tweets) {
-      tweetsInfo.push(
-        readTweetDetails(
-          tweetsUrls.find(
-            (item) =>
-              item.url === tweets[index][1] ||
-              item.original_url === tweets[index][1]
-          ),
-          tweets[index][0]
-        )
-      );
-      console.log(`[⏳] Processed #${parseInt(index) + 1}`);
+    for (const login of logins) {
+      data.push(await mainTask(browser, login));
     }
 
-    if (tweetsInfo.length) {
-      await fsPromises.writeFile(
-        'tweets.json',
-        JSON.stringify(tweetsInfo, null, 2),
-        'utf-8'
-      );
-      console.log(`Last post id: ${tweetsInfo[0].tweet.id}`);
-      await User.updateOne(
-        { login: login.toLowerCase() },
-        { login: login.toLowerCase(), tweetId: tweetsInfo[0].tweet.id },
-        { upsert: true }
-      );
-    } else {
-      console.log('No new tweets');
-    }
-    console.log(
-      `Done ✅. Time: ${((performance.now() - start) / 1000).toFixed(2)}`
+    await fsPromises.writeFile(
+      'data.json',
+      JSON.stringify(data, null, 2),
+      'utf-8'
     );
+
+    console.log('Done ✅');
   } catch (error) {
     console.log(error);
   } finally {
