@@ -261,10 +261,16 @@ function editTweetText(tweetInfo, tweetLegacyBlock) {
       const mentions = tweetLegacyBlock.entities.user_mentions;
 
       for (const mention of mentions) {
-        tweetInfo.full_text = tweetInfo.full_text.replace(
-          `@${mention.screen_name}`,
-          `<a href="${process.env.TWITTER_BASE}/${mention.screen_name}">@${mention.screen_name}</a>`
+        const startIndexMention = tweetInfo.full_text
+          .toLowerCase()
+          .indexOf(`@${mention.screen_name.toLowerCase()}`);
+        const afterString = tweetInfo.full_text.slice(
+          startIndexMention + mention.screen_name.length + 1
         );
+        tweetInfo.full_text =
+          tweetInfo.full_text.slice(0, startIndexMention) +
+          `<a href="${process.env.TWITTER_BASE}/${mention.screen_name}">@${mention.screen_name}</a>` +
+          afterString;
       }
     }
 
@@ -291,7 +297,7 @@ function tweetTask(tweetObj, browser, queue) {
     const responses = await getUserPage('VancityReynolds', browser);
     const tweetsUrls = getTweetsUrls(responses);
     const tweetsInfo = [];
-    const queue = new TaskQueue(5);
+    const queue = new TaskQueue(2);
     const promises = tweetsUrls.map((tweetUrl) =>
       tweetTask(tweetUrl, browser, queue)
     );
