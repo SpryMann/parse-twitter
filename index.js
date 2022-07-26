@@ -52,7 +52,6 @@ async function getUserPage(userLogin, browser) {
           url: res.url(),
           data: await res.json(),
         });
-        return responses;
       }
     });
 
@@ -113,9 +112,16 @@ async function getTweetDetails(tweetUrl, browser) {
 
 async function getTweetsUrls(login, content) {
   try {
-    const screenName = content[0].data.data.user.result.legacy.screen_name;
+    const userByScreenNameContent = content.find((item) =>
+      /\/graphql\/(.+)\/UserByScreenName/.test(item.url)
+    );
+    const userTweetsContent = content.find((item) =>
+      /\/graphql\/(.+)\/UserTweets/.test(item.url)
+    );
+    const screenName =
+      userByScreenNameContent.data.data.user.result.legacy.screen_name;
     const tweetsSection =
-      content.slice(-1)[0].data.data.user.result.timeline_v2.timeline
+      userTweetsContent.data.data.user.result.timeline_v2.timeline
         .instructions[1].entries;
     const tweetsUrls = [];
     const lastTweetId = await User.findOne({ login: login.toLowerCase() });
@@ -178,9 +184,19 @@ async function getTweetsUrls(login, content) {
 
 function readTweetDetails(tweetPreInfo, content) {
   try {
-    const tweetDetails =
+    const tweetsEntries =
       content.data.threaded_conversation_with_injections_v2.instructions[0]
-        .entries[0];
+        .entries;
+    const tweetDetails =
+      tweetPreInfo.status === 'Retweet'
+        ? tweetsEntries.find((item) =>
+            item.entryId.includes(
+              tweetPreInfo.original_url.split('/').slice(-1)[0]
+            )
+          )
+        : tweetsEntries.find((item) =>
+            item.entryId.includes(tweetPreInfo.url.split('/').slice(-1)[0])
+          );
     const tweetResultBlock =
       tweetDetails.content.itemContent.tweet_results.result;
     const tweetLegacyBlock = tweetResultBlock.legacy;
@@ -348,7 +364,18 @@ async function mainTask(browser, login) {
 
 (async () => {
   const browser = await puppeteer.launch();
-  const logins = ['Skydance', 'AADaddario', 'taylorswift13'];
+  const logins = [
+    'Skydance',
+    'AADaddario',
+    'taylorswift13',
+    'TheRock',
+    'NICKIMINAJ',
+    'lostinhist0ry',
+    'theweeknd',
+    'RuslanUsachev',
+    'teenwolf_rt',
+    'ChrisEvans',
+  ];
   const data = [];
   try {
     for (const login of logins) {
