@@ -2,6 +2,8 @@ import 'dotenv/config';
 import puppeteer from 'puppeteer';
 import fakeUa from 'fake-useragent';
 import { promises as fsPromises } from 'fs';
+import mongoose from 'mongoose';
+import { User } from './models/index.js';
 
 class TaskQueue {
   constructor(concurrency) {
@@ -109,16 +111,21 @@ async function getTweetDetails(tweetUrl, browser) {
   }
 }
 
-function getTweetsUrls(content) {
+async function getTweetsUrls(login, content) {
   try {
     const screenName = content[0].data.data.user.result.legacy.screen_name;
     const tweetsSection =
       content.slice(-1)[0].data.data.user.result.timeline_v2.timeline
         .instructions[1].entries;
     const tweetsUrls = [];
+    const lastTweetId = await User.findOne({ login: login.toLowerCase() });
 
     for (const tweet of tweetsSection) {
       if (/^tweet-(.+)/.test(tweet.entryId)) {
+        if (lastTweetId && lastTweetId.tweetId.toString() === tweet.sortIndex) {
+          break;
+        }
+
         if (
           tweet.content.itemContent.tweet_results.result.legacy
             .retweeted_status_result
@@ -291,11 +298,11 @@ function tweetTask(tweetObj, browser, queue) {
 
 (async () => {
   const browser = await puppeteer.launch();
-
+  const login = 'theweeknd';
   try {
     const start = performance.now();
-    const responses = await getUserPage('VancityReynolds', browser);
-    const tweetsUrls = getTweetsUrls(responses);
+    const responses = await getUserPage(login, browser);
+    const tweetsUrls = await getTweetsUrls(login, responses);
     const tweetsInfo = [];
     const queue = new TaskQueue(2);
     const promises = tweetsUrls.map((tweetUrl) =>
@@ -318,12 +325,21 @@ function tweetTask(tweetObj, browser, queue) {
       console.log(`[⏳] Processed #${parseInt(index) + 1}`);
     }
 
-    await fsPromises.writeFile(
-      'tweets.json',
-      JSON.stringify(tweetsInfo, null, 2),
-      'utf-8'
-    );
-    console.log(`Last post id: ${tweetsInfo[0].tweet.id}`);
+    if (tweetsInfo.length) {
+      await fsPromises.writeFile(
+        'tweets.json',
+        JSON.stringify(tweetsInfo, null, 2),
+        'utf-8'
+      );
+      console.log(`Last post id: ${tweetsInfo[0].tweet.id}`);
+      await User.updateOne(
+        { login: login.toLowerCase() },
+        { login: login.toLowerCase(), tweetId: tweetsInfo[0].tweet.id },
+        { upsert: true }
+      );
+    } else {
+      console.log('No new tweets');
+    }
     console.log(
       `Done ✅. Time: ${((performance.now() - start) / 1000).toFixed(2)}`
     );
@@ -331,5 +347,6 @@ function tweetTask(tweetObj, browser, queue) {
     console.log(error);
   } finally {
     await browser.close();
+    await mongoose.disconnect();
   }
 })();
