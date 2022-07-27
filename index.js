@@ -65,6 +65,7 @@ async function mainTask(browser, login) {
 
 (async () => {
   const browser = await puppeteer.launch();
+  // Add here logins for parsing
   const logins = [
     'evamillersha',
     'Stranger_Things',
