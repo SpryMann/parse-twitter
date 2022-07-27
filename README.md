@@ -2,7 +2,7 @@
 
 ## Вопросы
 
-- [ ] Как оформлять тред твитов?
+- [x] Как оформлять тред твитов?
 
 ## TODO:
 
@@ -14,6 +14,7 @@
 - [x] Сделать что-то с ссылками в конце поста (Просто удаляю)
 - [x] Парсинг массива логинов пользователей
 - [x] HomeConversation tweet type
+- [ ] Реализовать получение данных ретвита цитирования
 - [ ] Рефакторинг
 
 ## Возможности
@@ -31,14 +32,24 @@
 [
     {
         "login": "elonmusk",
-        "tweet": {
+        "tweet": [
+          {
             "id": "1550545593260466176",
             "full_text": "This is text of tweet",
             "video": "https://video.twimg.com/ext_tw_video/1551319195673042944/pu/vid/540x438/k8LmL7w8usmMUehX.mp4?tag=12",
             "photo": "https://pbs.twimg.com/media/FYgMgjwUsAAyWgp.jpg",
             "outer_url": "https://rol.st/3PJVXoM",
             "parent": {},
-        }
+          },
+          {
+            "id": "1550545593260466176",
+            "full_text": "This is text of tweet",
+            "video": "https://video.twimg.com/ext_tw_video/1551319195673042944/pu/vid/540x438/k8LmL7w8usmMUehX.mp4?tag=12",
+            "photo": "https://pbs.twimg.com/media/FYgMgjwUsAAyWgp.jpg",
+            "outer_url": "https://rol.st/3PJVXoM",
+            "parent": {},
+          }
+        ]
     }
 ]
 ```

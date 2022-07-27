@@ -201,21 +201,23 @@ function readTweetDetails(tweetPreInfo, content) {
       tweetDetails.content.itemContent.tweet_results.result;
     const tweetLegacyBlock = tweetResultBlock.legacy;
     const tweetInfo = {
-      login: tweetPreInfo.screenName,
-      tweet: {
-        id: tweetPreInfo.url.split('/').slice(-1)[0],
-      },
+      id: tweetPreInfo.url.split('/').slice(-1)[0],
     };
     let tweetFullText = tweetLegacyBlock.full_text.trim();
     const { outer_url, video, photo } = getTweetMedia(tweetLegacyBlock);
 
-    tweetInfo.tweet.outer_url = outer_url;
-    tweetInfo.tweet.video = video;
-    tweetInfo.tweet.photo = photo;
-    tweetInfo.tweet.full_text = tweetFullText;
-    tweetFullText = editTweetText(tweetInfo.tweet, tweetLegacyBlock);
+    tweetInfo.outer_url = outer_url;
+    tweetInfo.video = video;
+    tweetInfo.photo = photo;
+    tweetInfo.full_text = tweetFullText;
+    tweetFullText = editTweetText(tweetInfo, tweetLegacyBlock);
 
     if (tweetPreInfo.status === 'Quotation') {
+      const parentTweetId =
+        tweetResultBlock.quoted_status_result.result.rest_id;
+      const parentScreenName =
+        tweetResultBlock.quoted_status_result.result.core.user_results.result
+          .legacy.screen_name;
       const tweetQuoteLegacyBlock =
         tweetResultBlock.quoted_status_result.result.legacy;
       const parentTweet = {};
@@ -225,16 +227,18 @@ function readTweetDetails(tweetPreInfo, content) {
         video: parentVideo,
         photo: parentPhoto,
       } = getTweetMedia(tweetQuoteLegacyBlock);
+      parentTweet.id = parentTweetId;
+      parentTweet.login = parentScreenName;
       parentTweet.outer_url = parentOuterUrl;
       parentTweet.video = parentVideo;
       parentTweet.photo = parentPhoto;
       parentTweet.full_text = parentTweetFullText;
       parentTweetFullText = editTweetText(parentTweet, tweetQuoteLegacyBlock);
       parentTweet.full_text = parentTweetFullText;
-      tweetInfo.tweet.parent = parentTweet;
+      tweetInfo.parent = parentTweet;
     }
 
-    tweetInfo.tweet.full_text = tweetFullText;
+    tweetInfo.full_text = tweetFullText;
     return tweetInfo;
   } catch (error) {
     throw error;
@@ -346,7 +350,7 @@ async function mainTask(browser, login) {
     );
     await User.updateOne(
       { login: login.toLowerCase() },
-      { login: login.toLowerCase(), tweetId: tweetsInfo[0].tweet.id },
+      { login: login.toLowerCase(), tweetId: tweetsInfo[0].id },
       { upsert: true }
     );
   } else {
@@ -359,23 +363,15 @@ async function mainTask(browser, login) {
     ).toFixed(2)}`
   );
 
-  return tweetsInfo;
+  return {
+    login,
+    tweets: tweetsInfo,
+  };
 }
 
 (async () => {
   const browser = await puppeteer.launch();
-  const logins = [
-    'Skydance',
-    'AADaddario',
-    'taylorswift13',
-    'TheRock',
-    'NICKIMINAJ',
-    'lostinhist0ry',
-    'theweeknd',
-    'RuslanUsachev',
-    'teenwolf_rt',
-    'ChrisEvans',
-  ];
+  const logins = ['TheRock'];
   const data = [];
   try {
     for (const login of logins) {
