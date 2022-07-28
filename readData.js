@@ -61,7 +61,7 @@ export async function getTweetsUrls(login, content) {
         }
       }
 
-      if (tweetsUrls.length >= 10) {
+      if (!lastTweetId && tweetsUrls.length >= 10) {
         break;
       }
     }

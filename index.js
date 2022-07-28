@@ -1,3 +1,3 @@
-import parse from './parser';
+import parse from './parser.js';
 
-parse(['TheRock', 'ChrisEvans']);
+parse(['Simone_Biles']);
