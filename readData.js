@@ -1,97 +1,55 @@
 import { User } from './models/index.js';
 
-export async function getTweetsUrls(login, content) {
+export async function readUserData(login, content) {
   try {
-    const userByScreenNameContent = content.find((item) =>
-      /\/graphql\/(.+)\/UserByScreenName/.test(item.url)
-    );
-    const userTweetsContent = content.find((item) =>
+    const userTweets = content.find((item) =>
       /\/graphql\/(.+)\/UserTweets/.test(item.url)
-    );
-    const screenName =
-      userByScreenNameContent.data.data.user.result.legacy.screen_name;
-    const tweetsSection =
-      userTweetsContent.data.data.user.result.timeline_v2.timeline
-        .instructions[1].entries;
-    const tweetsUrls = [];
+    ).data;
+    const tweetsEntries =
+      userTweets.data.user.result.timeline_v2.timeline.instructions[1].entries;
     const lastTweetId = await User.findOne({ login: login.toLowerCase() });
+    const userTweetsData = {
+      login,
+      tweets: [],
+    };
 
-    for (const tweet of tweetsSection) {
-      if (/^tweet-(.+)/.test(tweet.entryId)) {
-        if (lastTweetId && lastTweetId.tweetId.toString() === tweet.sortIndex) {
+    for (const entry of tweetsEntries) {
+      if (/^tweet-(.+)/.test(entry.entryId)) {
+        if (lastTweetId && lastTweetId.tweetId.toString() === entry.sortIndex) {
           break;
         }
 
-        if (
-          tweet.content.itemContent.tweet_results.result.legacy
-            .retweeted_status_result
-        ) {
-          const originalScreenName =
-            tweet.content.itemContent.tweet_results.result.legacy
-              .retweeted_status_result.result.core.user_results.result.legacy
-              .screen_name;
-          const originalTweetId =
-            tweet.content.itemContent.tweet_results.result.legacy
-              .retweeted_status_result.result.rest_id;
+        userTweetsData.tweets.push(readTweetData(entry));
 
-          tweetsUrls.push({
-            screenName,
-            status: 'Retweet',
-            url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
-            original_url: `${process.env.TWITTER_BASE}/${originalScreenName}/status/${originalTweetId}`,
-          });
-        } else if (
-          tweet.content.itemContent.tweet_results.result.legacy.is_quote_status
-        ) {
-          tweetsUrls.push({
-            screenName,
-            status: 'Quotation',
-            url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
-            original_url:
-              tweet.content.itemContent.tweet_results.result.legacy
-                .quoted_status_permalink.expanded,
-          });
-        } else {
-          tweetsUrls.push({
-            screenName,
-            status: 'Tweet',
-            url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
-            original_url: `${process.env.TWITTER_BASE}/${screenName}/status/${tweet.sortIndex}`,
-          });
+        if (!lastTweetId && userTweetsData.tweets.length >= 10) {
+          break;
         }
-      }
-
-      if (!lastTweetId && tweetsUrls.length >= 10) {
-        break;
       }
     }
 
-    return tweetsUrls;
+    return userTweetsData;
   } catch (error) {
     throw error;
   }
 }
 
-export function readTweetDetails(tweetPreInfo, content) {
+function readTweetData(tweetBlock) {
   try {
-    const tweetsEntries =
-      content.data.threaded_conversation_with_injections_v2.instructions[0]
-        .entries;
-    const tweetDetails = tweetsEntries.find((item) =>
-      item.entryId.includes(tweetPreInfo.url.split('/').slice(-1)[0])
-    );
     const tweetResultBlock =
-      tweetDetails.content.itemContent.tweet_results.result;
+      tweetBlock.content.itemContent.tweet_results.result;
     const tweetLegacyBlock = tweetResultBlock.legacy;
     let tweetInfo = {
-      id: tweetPreInfo.url.split('/').slice(-1)[0],
+      id: tweetBlock.sortIndex,
     };
 
-    if (tweetPreInfo.status === 'Retweet') {
-      tweetInfo = { ...tweetInfo, ...getRetweet(tweetLegacyBlock) };
+    if (tweetLegacyBlock.retweeted_status_result) {
+      tweetInfo = {
+        ...tweetInfo,
+        ...readRetweet(tweetLegacyBlock.retweeted_status_result.result),
+      };
     } else {
       let tweetFullText = tweetLegacyBlock.full_text.trim();
-      const { outer_url, video, photo } = getTweetMedia(tweetLegacyBlock);
+      const { outer_url, video, photo } = readTweetMedia(tweetLegacyBlock);
 
       tweetInfo.outer_url = outer_url;
       tweetInfo.video = video;
@@ -100,8 +58,11 @@ export function readTweetDetails(tweetPreInfo, content) {
       tweetFullText = editTweetText(tweetInfo, tweetLegacyBlock);
       tweetInfo.full_text = tweetFullText;
 
-      if (tweetLegacyBlock.is_quote_status) {
-        const parentTweet = getQuotationTweet(tweetResultBlock);
+      if (
+        tweetLegacyBlock.is_quote_status &&
+        tweetResultBlock.quoted_status_result.result.rest_id
+      ) {
+        const parentTweet = readQuotation(tweetResultBlock);
         tweetInfo.parent = parentTweet;
       }
     }
@@ -112,24 +73,82 @@ export function readTweetDetails(tweetPreInfo, content) {
   }
 }
 
-function getTweetMedia(tweetLegacyBlock) {
+function readRetweet(tweetResultBlock) {
+  try {
+    const tweetInfo = {};
+    let tweetFullText = tweetResultBlock.legacy.full_text.trim();
+    const { outer_url, video, photo } = readTweetMedia(tweetResultBlock.legacy);
+    tweetInfo.outer_url = outer_url;
+    tweetInfo.video = video;
+    tweetInfo.photo = photo;
+    tweetInfo.full_text = tweetFullText;
+    tweetFullText = editTweetText(tweetInfo, tweetResultBlock.legacy);
+    tweetInfo.full_text = tweetFullText;
+
+    if (
+      tweetResultBlock.legacy.is_quote_status &&
+      tweetResultBlock.quoted_status_result.result.rest_id
+    ) {
+      tweetInfo.parent = readQuotation(tweetResultBlock);
+    }
+
+    return tweetInfo;
+  } catch (error) {
+    throw error;
+  }
+}
+
+function readQuotation(tweetResultBlock) {
+  try {
+    const parentTweetId = tweetResultBlock.quoted_status_result.result.rest_id;
+    const parentScreenName =
+      tweetResultBlock.quoted_status_result.result.core.user_results.result
+        .legacy.screen_name;
+    const tweetQuoteLegacyBlock =
+      tweetResultBlock.quoted_status_result.result.legacy;
+    const parentTweet = {};
+    let parentTweetFullText = tweetQuoteLegacyBlock.full_text.trim();
+    const { outer_url, video, photo } = readTweetMedia(tweetQuoteLegacyBlock);
+    parentTweet.id = parentTweetId;
+    parentTweet.login = parentScreenName;
+    parentTweet.outer_url = outer_url;
+    parentTweet.video = video;
+    parentTweet.photo = photo;
+    parentTweet.full_text = parentTweetFullText;
+    parentTweetFullText = editTweetText(parentTweet, tweetQuoteLegacyBlock);
+    parentTweet.full_text = parentTweetFullText;
+
+    return parentTweet;
+  } catch (error) {
+    throw error;
+  }
+}
+
+function readTweetMedia(tweetLegacyBlock) {
   try {
     const mediaInfo = {
       outer_url: null,
-      video: null,
-      photo: null,
+      video: [],
+      photo: [],
     };
 
     if (tweetLegacyBlock.extended_entities) {
-      const extEnt = tweetLegacyBlock.extended_entities;
-      const type = extEnt.media[0].type;
+      const extEnts = tweetLegacyBlock.extended_entities.media;
 
-      if (type === 'photo') {
-        mediaInfo.photo = extEnt.media[0].media_url_https;
-      } else if (type === 'video' || type === 'animated_gif') {
-        mediaInfo.video = extEnt.media[0].video_info.variants
-          .filter((item) => item.hasOwnProperty('bitrate') && item.bitrate >= 0)
-          .sort((a, b) => b.bitrate - a.bitrate)[0].url;
+      for (const extEnt of extEnts) {
+        const type = extEnt.type;
+
+        if (type === 'photo') {
+          mediaInfo.photo.push(extEnt.media_url_https);
+        } else if (type === 'video' || type === 'animated_gif') {
+          mediaInfo.video.push(
+            extEnt.video_info.variants
+              .filter(
+                (item) => item.hasOwnProperty('bitrate') && item.bitrate >= 0
+              )
+              .sort((a, b) => b.bitrate - a.bitrate)[0].url
+          );
+        }
       }
     }
 
@@ -145,7 +164,11 @@ function getTweetMedia(tweetLegacyBlock) {
 
 function editTweetText(tweetInfo, tweetLegacyBlock) {
   try {
-    if (tweetInfo.outer_url || tweetInfo.video || tweetInfo.photo) {
+    if (
+      tweetInfo.outer_url ||
+      tweetInfo.video.length ||
+      tweetInfo.photo.length
+    ) {
       tweetInfo.full_text = tweetInfo.full_text
         .slice(0, tweetInfo.full_text.indexOf('https://t.co/'))
         .trim();
@@ -169,64 +192,6 @@ function editTweetText(tweetInfo, tweetLegacyBlock) {
     }
 
     return tweetInfo.full_text;
-  } catch (error) {
-    throw error;
-  }
-}
-
-function getRetweet(tweetLegacyBlock) {
-  try {
-    const retweetedStatusResult = tweetLegacyBlock.retweeted_status_result;
-    const tweetInfo = {};
-    let tweetFullText = retweetedStatusResult.result.legacy.full_text;
-    const { outer_url, video, photo } = getTweetMedia(
-      retweetedStatusResult.result.legacy
-    );
-    tweetInfo.outer_url = outer_url;
-    tweetInfo.video = video;
-    tweetInfo.photo = photo;
-    tweetInfo.full_text = tweetFullText;
-    tweetFullText = editTweetText(
-      tweetInfo,
-      retweetedStatusResult.result.legacy
-    );
-    tweetInfo.full_text = tweetFullText;
-
-    if (retweetedStatusResult.result.legacy.is_quote_status) {
-      tweetInfo.parent = getQuotationTweet(retweetedStatusResult.result);
-    }
-
-    return tweetInfo;
-  } catch (error) {
-    throw error;
-  }
-}
-
-function getQuotationTweet(tweetResultBlock) {
-  try {
-    const parentTweetId = tweetResultBlock.quoted_status_result.result.rest_id;
-    const parentScreenName =
-      tweetResultBlock.quoted_status_result.result.core.user_results.result
-        .legacy.screen_name;
-    const tweetQuoteLegacyBlock =
-      tweetResultBlock.quoted_status_result.result.legacy;
-    const parentTweet = {};
-    let parentTweetFullText = tweetQuoteLegacyBlock.full_text.trim();
-    const {
-      outer_url: parentOuterUrl,
-      video: parentVideo,
-      photo: parentPhoto,
-    } = getTweetMedia(tweetQuoteLegacyBlock);
-    parentTweet.id = parentTweetId;
-    parentTweet.login = parentScreenName;
-    parentTweet.outer_url = parentOuterUrl;
-    parentTweet.video = parentVideo;
-    parentTweet.photo = parentPhoto;
-    parentTweet.full_text = parentTweetFullText;
-    parentTweetFullText = editTweetText(parentTweet, tweetQuoteLegacyBlock);
-    parentTweet.full_text = parentTweetFullText;
-
-    return parentTweet;
   } catch (error) {
     throw error;
   }

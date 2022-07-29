@@ -1,3 +1,10 @@
 import parse from './parser.js';
 
-parse(['Simone_Biles']);
+parse([
+  'aadaddario',
+  'nickiminaj',
+  'theweeknd',
+  'caradelevingne',
+  'therock',
+  'chrisevans',
+]);
