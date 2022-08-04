@@ -164,13 +164,11 @@ function readTweetMedia(tweetLegacyBlock) {
 
 function editTweetText(tweetInfo, tweetLegacyBlock) {
   try {
-    if (
-      tweetInfo.outer_url ||
-      tweetInfo.video.length ||
-      tweetInfo.photo.length
-    ) {
+    if (tweetInfo.video.length || tweetInfo.photo.length) {
       tweetInfo.full_text = tweetInfo.full_text
-        .slice(0, tweetInfo.full_text.indexOf('https://t.co/'))
+        .split(' ')
+        .slice(0, -1)
+        .join(' ')
         .trim();
     }
 
