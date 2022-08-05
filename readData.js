@@ -46,6 +46,7 @@ function readTweetData(tweetBlock) {
       tweetInfo = {
         ...tweetInfo,
         ...readRetweet(tweetLegacyBlock.retweeted_status_result.result),
+        status: 'Retweet',
       };
     } else {
       let tweetFullText = tweetLegacyBlock.full_text.trim();
@@ -64,7 +65,12 @@ function readTweetData(tweetBlock) {
       ) {
         const parentTweet = readQuotation(tweetResultBlock);
         tweetInfo.parent = parentTweet;
+        tweetInfo.status = 'Quotation';
       }
+    }
+
+    if (!tweetInfo.hasOwnProperty('status')) {
+      tweetInfo.status = 'Tweet';
     }
 
     return tweetInfo;
